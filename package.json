@@ -1,23 +1,24 @@
 {
-    "name": "backend",
-    "version": "1.0.0",
-    "type": "module",
-    "main": "serverWrapper.js",
-    "scripts": {
-      "start": "node serverWrapper.js",
-      "dev": "nodemon serverWrapper.js"
-    },
-    "dependencies": {
-      "@google/genai": "^2.7.0",
-      "bcryptjs": "^3.0.3",
-      "cors": "^2.8.5",
-      "dotenv": "^16.4.7",
-      "express": "^4.21.2",
-      "jsonwebtoken": "^9.0.2",
-      "nodemailer": "^6.10.0",
-      "pg": "^8.13.3"
-    },
-    "devDependencies": {
-      "nodemon": "^3.1.9"
-    }
+  "name": "backend",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "serverWrapper.js",
+  "scripts": {
+    "start": "node serverWrapper.js",
+    "dev": "nodemon serverWrapper.js"
+  },
+  "dependencies": {
+    "@google/genai": "^2.7.0",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^6.10.0",
+    "pg": "^8.13.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
   }
+}
