@@ -12,8 +12,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Set up temporary local storage for incoming files
-const upload = multer({ dest: 'uploads/' });
+// Save uploaded files to Vercel's temporary directory
+const upload = multer({ dest: '/tmp/' });
 
 // 🔥 FIXED INITIALIZATION: In the @google/genai SDK, you pass the key directly inside the options object
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
