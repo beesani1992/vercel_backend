@@ -5,7 +5,7 @@ import db from './db.js';
 import { authenticateToken } from './authMiddleware.js';
 
 const router = express.Router();
-const JWT_SECRET = 'your-secret-key-123';         
+const JWT_SECRET = '29963ae672c4af92ef6c298a1509fa01bcf42f520a4205230dba314ae751a61a';         
 
 // 1. Register Route
 router.post('/register', async (req, res) => {
