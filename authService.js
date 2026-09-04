@@ -7,16 +7,20 @@ export const JWT_SECRET = process.env.JWT_SECRET || 'your_fallback_jwt_secret';
 // 1. REGISTER USER
 export async function registerUser(username, email, password) {
   try {
-    // Check if user already exists
-    const existingUser = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    // Check if user already exists by email or username
+    const existingUser = await db.query(
+      'SELECT id FROM users WHERE email = $1 OR username = $2',
+      [email, username]
+    );
+
     if (existingUser.rows.length > 0) {
-      return { success: false, message: 'Email is already registered' };
+      return { success: false, message: 'Email or Username is already registered' };
     }
 
     // Hash password and insert
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await db.query(
-      'INSERT INTO users (username, email, password, credits, is_verified) VALUES ($1, $2, $3, $4, 0) RETURNING id, username, email, credits',
+      'INSERT INTO users (username, email, password, credits, is_verified) VALUES ($1, $2, $3, $4, false) RETURNING id, username, email, credits',
       [username, email, hashedPassword, 10]
     );
 
@@ -47,7 +51,7 @@ export async function loginUser(email, password) {
     }
 
     // Check verification status
-    if (user.is_verified === 0) {
+    if (!user.is_verified || user.is_verified === 0) {
       return {
         success: false,
         requiresOtp: true,
@@ -56,13 +60,22 @@ export async function loginUser(email, password) {
       };
     }
 
-    // Issue JWT Token
-    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    // Issue JWT Token with user details
+    const token = jwt.sign(
+      { id: user.id, username: user.username, email: user.email },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
 
     return {
       success: true,
       token,
-      credits: user.credits,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        credits: user.credits
+      },
       message: 'Login successful'
     };
   } catch (error) {
@@ -93,26 +106,28 @@ export async function getUserCredits(userId) {
   }
 }
 
-// 5. DEDUCT CREDITS
+// 5. DEDUCT CREDITS (Atomic SQL Update)
 export async function deductCredits(userId, cost = 1) {
   try {
-    const result = await db.query('SELECT credits FROM users WHERE id = $1', [userId]);
-    const user = result.rows[0];
+    const result = await db.query(
+      `UPDATE users 
+       SET credits = credits - $1 
+       WHERE id = $2 AND credits >= $1 
+       RETURNING credits`,
+      [cost, userId]
+    );
 
-    if (!user) {
-      return { success: false, message: 'User not found' };
-    }
-
-    if (user.credits < cost) {
+    if (result.rows.length === 0) {
+      const userCheck = await db.query('SELECT credits FROM users WHERE id = $1', [userId]);
+      if (userCheck.rows.length === 0) {
+        return { success: false, message: 'User not found' };
+      }
       return { success: false, message: 'Insufficient credits' };
     }
 
-    const newBalance = user.credits - cost;
-    await db.query('UPDATE users SET credits = $1 WHERE id = $2', [newBalance, userId]);
-
     return {
       success: true,
-      remainingCredits: newBalance,
+      remainingCredits: result.rows[0].credits,
       message: 'Credits deducted successfully'
     };
   } catch (error) {
