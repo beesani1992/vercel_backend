@@ -20,5 +20,10 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
+// Add this in serverWrapper.js so accessing the base URL returns JSON instead of 404
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'online', message: 'Vercel Express Backend is active' });
+});
+
 // Export default app instance (Required for Vercel Serverless Functions)
 export default app;
