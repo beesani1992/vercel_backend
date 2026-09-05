@@ -1,16 +1,23 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import db from './db.js'; // Imports the pg Pool instance
+import db from './db.js';
 
 export const JWT_SECRET = process.env.JWT_SECRET || 'your_fallback_jwt_secret';
 
 // 1. REGISTER USER
 export async function registerUser(username, email, password) {
   try {
-    // Check if user already exists by email or username
+    const cleanUsername = (username && username.trim() !== '') ? username.trim() : null;
+    const cleanEmail = email ? email.trim().toLowerCase() : '';
+
+    if (!cleanEmail || !password) {
+      return { success: false, message: 'Email and password are required' };
+    }
+
+    // Check if user already exists
     const existingUser = await db.query(
-      'SELECT id FROM users WHERE email = $1 OR username = $2',
-      [email, username]
+      'SELECT id FROM users WHERE email = $1 OR (username IS NOT NULL AND username = $2)',
+      [cleanEmail, cleanUsername]
     );
 
     if (existingUser.rows.length > 0) {
@@ -19,11 +26,9 @@ export async function registerUser(username, email, password) {
 
     // Hash password and insert
     const hashedPassword = await bcrypt.hash(password, 10);
-    // Fallback undefined to null so pg driver handles it cleanly
-    const cleanUsername = username || null;
     const result = await db.query(
       'INSERT INTO users (username, email, password, credits, is_verified) VALUES ($1, $2, $3, $4, 0) RETURNING id, username, email, credits',
-       [cleanUsername, email, hashedPassword, 10]
+      [cleanUsername, cleanEmail, hashedPassword, 10]
     );
 
     return {
@@ -33,14 +38,24 @@ export async function registerUser(username, email, password) {
     };
   } catch (error) {
     console.error('Error in registerUser:', error);
-    return { success: false, message: 'Database error during registration' };
+    return { 
+      success: false, 
+      message: 'Database error during registration', 
+      detail: error.message 
+    };
   }
 }
 
 // 2. LOGIN USER
 export async function loginUser(email, password) {
   try {
-    const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    const cleanEmail = email ? email.trim().toLowerCase() : '';
+
+    if (!cleanEmail || !password) {
+      return { success: false, message: 'Email and password are required' };
+    }
+
+    const result = await db.query('SELECT * FROM users WHERE email = $1', [cleanEmail]);
     const user = result.rows[0];
 
     if (!user) {
@@ -52,8 +67,8 @@ export async function loginUser(email, password) {
       return { success: false, message: 'Invalid email or password' };
     }
 
-    // Check verification status
-    if (!user.is_verified || user.is_verified === 0) {
+    // Check verification status (handles numeric 0 or boolean false)
+    if (user.is_verified === 0 || user.is_verified === false || !user.is_verified) {
       return {
         success: false,
         requiresOtp: true,
@@ -62,7 +77,7 @@ export async function loginUser(email, password) {
       };
     }
 
-    // Issue JWT Token with user details
+    // Issue JWT Token
     const token = jwt.sign(
       { id: user.id, username: user.username, email: user.email },
       JWT_SECRET,
@@ -82,14 +97,18 @@ export async function loginUser(email, password) {
     };
   } catch (error) {
     console.error('Error in loginUser:', error);
-    return { success: false, message: 'Database error during login' };
+    return { 
+      success: false, 
+      message: 'Database error during login', 
+      detail: error.message 
+    };
   }
 }
 
 // 3. GET USER PROFILE
 export async function getUserProfile(userId) {
   try {
-    const result = await db.query('SELECT id, username, email, credits FROM users WHERE id = $1', [userId]);
+    const result = await db.query('SELECT id, username, email, credits, is_verified FROM users WHERE id = $1', [userId]);
     return result.rows[0] || null;
   } catch (error) {
     console.error('Error in getUserProfile:', error);
@@ -108,7 +127,7 @@ export async function getUserCredits(userId) {
   }
 }
 
-// 5. DEDUCT CREDITS (Atomic SQL Update)
+// 5. DEDUCT CREDITS
 export async function deductCredits(userId, cost = 1) {
   try {
     const result = await db.query(
@@ -134,6 +153,6 @@ export async function deductCredits(userId, cost = 1) {
     };
   } catch (error) {
     console.error('Error in deductCredits:', error);
-    return { success: false, message: 'Database error during credit deduction' };
+    return { success: false, message: 'Database error during credit deduction', detail: error.message };
   }
 }
