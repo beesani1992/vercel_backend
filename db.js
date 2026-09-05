@@ -5,9 +5,12 @@ dotenv.config();
 
 const { Pool } = pg;
 
+// Vercel auto-populates POSTGRES_URL or DATABASE_URL
+const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // Required for Supabase connections
+  connectionString,
+  ssl: { rejectUnauthorized: false }
 });
 
 export default pool;
