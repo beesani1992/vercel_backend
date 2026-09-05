@@ -11,7 +11,7 @@ dotenv.config();
 const app = express();
 // Enable explicit CORS configuration
 app.use(cors({
-  origin: 'https://vercel-frontend-lemon-iota.vercel.app/', //replace with your frontend URL)
+  origin: 'https://vercel-frontend-lemon-iota.vercel.app', //replace with your frontend URL)
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
