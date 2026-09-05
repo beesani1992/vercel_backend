@@ -19,6 +19,8 @@ export async function registerUser(username, email, password) {
 
     // Hash password and insert
     const hashedPassword = await bcrypt.hash(password, 10);
+    // Fallback undefined to null so pg driver handles it cleanly
+    const cleanUsername = username || null;
     const result = await db.query(
       'INSERT INTO users (username, email, password, credits, is_verified) VALUES ($1, $2, $3, $4, false) RETURNING id, username, email, credits',
       [username, email, hashedPassword, 10]
