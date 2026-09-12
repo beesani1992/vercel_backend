@@ -4,7 +4,7 @@ dotenv.config();
 import app from './server.js';
 import authRoutes from './authRoutes.js';
 import creditRoutes from './creditRoutes.js';
-import paymentRoutes from './payment.js';
+import paymentRoutes from './payments.js';
 
 // 1. Attach authentication endpoints
 app.use('/api/auth', authRoutes);
