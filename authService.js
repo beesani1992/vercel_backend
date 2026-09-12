@@ -25,10 +25,11 @@ export async function registerUser(username, email, password) {
     }
 
     // Hash password and insert
+    const INITIAL_CREDITS = 70;
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await db.query(
       'INSERT INTO users (username, email, password, credits, is_verified) VALUES ($1, $2, $3, $4, 0) RETURNING id, username, email, credits',
-      [cleanUsername, cleanEmail, hashedPassword, 70]
+      [cleanUsername, cleanEmail, hashedPassword, INITIAL_CREDITS]
     );
 
     return {
