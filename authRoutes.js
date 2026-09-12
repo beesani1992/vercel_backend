@@ -57,7 +57,7 @@ router.post('/register', async (req, res) => {
 
     // Send OTP Email
     await transporter.sendMail({
-      from: `"Your App" <${process.env.EMAIL_USER}>`,
+      from: `"Video-To-Script" <${process.env.EMAIL_USER}>`,
       to: email,
       subject: 'Verify Your Email - OTP Code',
       html: `
