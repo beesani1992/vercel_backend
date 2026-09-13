@@ -4,7 +4,7 @@ dotenv.config();
 import app from './server.js';
 import authRoutes from './authRoutes.js';
 import creditRoutes from './creditRoutes.js';
-//import paymentRoutes from './payment.js';
+import paymentRoutes from './payment.js';
 
 // 1. Attach authentication endpoints
 app.use('/api/auth', authRoutes);
@@ -12,7 +12,7 @@ app.use('/api/auth', authRoutes);
 // 2. Attach credit endpoints
 app.use('/api/credits', creditRoutes);
 
-//app.use('/api/payments', paymentRoutes);
+app.use('/api/payments', paymentRoutes);
 
 const PORT = process.env.PORT || 5000;
 
