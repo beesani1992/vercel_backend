@@ -7,8 +7,8 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // Safepay credentials and endpoint
-const SAFEPAY_API_KEY = process.env.SAFEPAY_API_KEY || 'sec_sandbox_key_here';
-const SAFEPAY_BASE_URL = 'https://sandbox.api.getsafepay.com'; // Use https://api.getsafepay.com for production
+const SAFEPAY_BASE_URL = process.env.SAFEPAY_BASE_URL || 'https://sandbox.api.getsafepay.com';
+const SAFEPAY_API_KEY = process.env.SAFEPAY_API_KEY;
 
 // Credit mappings per package ID
 const PACKAGE_CREDITS = {
@@ -36,7 +36,12 @@ export const createSafepayTracker = async (req, res) => {
       amount: usdAmount * 100, // Amount in cents ($5.00 = 500)
       currency: 'USD',
       environment: 'sandbox'
-    });
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 10000
+      }
+    );
 
     const trackerToken = response.data?.data?.token;
 
