@@ -3,10 +3,10 @@ import { createSafepayTracker, verifySafepayPayment } from './paymentController.
 
 const router = express.Router();
 
-// POST /api/payments/create-safepay-tracker
-router.post('/create-safepay-tracker', createSafepayTracker);
+// Tracker creation endpoint (handles both kebab-case and camelCase)
+router.post(['/create-safepay-tracker', '/createSafepayTracker'], createSafepayTracker);
 
-// POST /api/payments/verify-safepay
-router.post('/verify-safepay', verifySafepayPayment);
+// Verification endpoint (handles all front-end naming variations)
+router.post(['/verify-safepay', '/verify-safepay-payment', '/verifySafepayPayment'], verifySafepayPayment);
 
 export default router;
