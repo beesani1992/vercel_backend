@@ -394,27 +394,13 @@ export const createSafepayTracker = async (
 
 
     const checkoutUrl =
-      safepay.checkouts.payment.create({
-
-        tracker:
-          trackerToken,
-
-        tbt:
-          authenticationToken,
-
-        environment:
-          SAFEPAY_ENVIRONMENT,
-
-        source:
-          "hosted",
-
-        redirect_url:
-          successUrl,
-
-        cancel_url:
-          cancelUrl
-
-      });
+      `${SAFEPAY_HOST}/embedded/checkout` +
+      `?tracker=${encodeURIComponent(trackerToken)}` +
+      `&tbt=${encodeURIComponent(authenticationToken)}` +
+      `&environment=${encodeURIComponent(SAFEPAY_ENVIRONMENT)}` +
+      `&source=hosted` +
+      `&redirect_url=${encodeURIComponent(successUrl)}` +
+      `&cancel_url=${encodeURIComponent(cancelUrl)}`;
 
 
     if (!checkoutUrl) {
