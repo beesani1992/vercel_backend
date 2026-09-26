@@ -21,7 +21,7 @@ const SAFEPAY_ENVIRONMENT =
 
 
 // ======================================================
-// PACKAGES
+// PACKAGE CONFIGURATION
 // ======================================================
 
 const PACKAGES = {
@@ -58,12 +58,14 @@ const getSupabaseClient = () => {
     process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl) {
-    throw new Error("SUPABASE_URL is missing");
+    throw new Error(
+      "SUPABASE_URL is missing."
+    );
   }
 
   if (!supabaseServiceKey) {
     throw new Error(
-      "SUPABASE_SERVICE_ROLE_KEY is missing"
+      "SUPABASE_SERVICE_ROLE_KEY is missing."
     );
   }
 
@@ -81,14 +83,14 @@ const getSupabaseClient = () => {
 
 
 // ======================================================
-// SAFEPAY
+// SAFEPAY CLIENT
 // ======================================================
 
 const getSafepayClient = () => {
 
   if (!SAFEPAY_SECRET_KEY) {
     throw new Error(
-      "SAFEPAY_SECRET_KEY is missing"
+      "SAFEPAY_SECRET_KEY is missing."
     );
   }
 
@@ -103,7 +105,7 @@ const getSafepayClient = () => {
 
 
 // ======================================================
-// CREATE SAFEPAY TRACKER
+// CREATE SAFEPAY PAYMENT SESSION
 // ======================================================
 
 export const createSafepayTracker = async (
@@ -114,8 +116,18 @@ export const createSafepayTracker = async (
   try {
 
     // --------------------------------------------------
-    // Check configuration
+    // Validate Safepay configuration
     // --------------------------------------------------
+
+    if (!SAFEPAY_SECRET_KEY) {
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "SAFEPAY_SECRET_KEY is not configured."
+      });
+
+    }
 
     if (!SAFEPAY_API_KEY) {
 
@@ -129,7 +141,7 @@ export const createSafepayTracker = async (
 
 
     // --------------------------------------------------
-    // Request
+    // Request body
     // --------------------------------------------------
 
     const {
@@ -162,7 +174,9 @@ export const createSafepayTracker = async (
       return res.status(400).json({
         success: false,
         message:
-          "Invalid packageId."
+          "Invalid packageId.",
+        availablePackages:
+          Object.keys(PACKAGES)
       });
 
     }
@@ -176,7 +190,7 @@ export const createSafepayTracker = async (
 
 
     // --------------------------------------------------
-    // Generate internal order ID
+    // Generate order ID
     // --------------------------------------------------
 
     const orderId =
@@ -186,29 +200,54 @@ export const createSafepayTracker = async (
 
 
     // --------------------------------------------------
-    // Amount in lowest denomination
+    // Convert USD to lowest denomination
     //
     // $5  = 500
     // $20 = 2000
     // $50 = 5000
     // --------------------------------------------------
 
-    const amount =
+    const amountInLowestDenomination =
       Math.round(price * 100);
 
 
     console.log(
-      "Creating Safepay tracker..."
+      "======================================"
     );
 
-    console.log({
-      orderId,
-      packageId,
-      credits,
+    console.log(
+      "Creating Safepay Payment Session"
+    );
+
+    console.log(
+      "Package:",
+      packageId
+    );
+
+    console.log(
+      "Credits:",
+      credits
+    );
+
+    console.log(
+      "Price:",
       price,
-      currency,
-      amount
-    });
+      currency
+    );
+
+    console.log(
+      "Amount:",
+      amountInLowestDenomination
+    );
+
+    console.log(
+      "Order ID:",
+      orderId
+    );
+
+    console.log(
+      "======================================"
+    );
 
 
     // --------------------------------------------------
@@ -222,11 +261,12 @@ export const createSafepayTracker = async (
     // --------------------------------------------------
     // CREATE PAYMENT SESSION
     //
-    // IMPORTANT:
-    // Only order_id is sent inside metadata.
+    // Current Safepay SDK method:
+    //
+    // safepay.payments.session.setup()
     // --------------------------------------------------
 
-    const response =
+    const paymentResponse =
       await safepay.payments.session.setup({
 
         merchant_api_key:
@@ -245,12 +285,23 @@ export const createSafepayTracker = async (
           currency,
 
         amount:
-          amount,
+          amountInLowestDenomination,
 
         metadata: {
 
           order_id:
-            orderId
+            orderId,
+
+          package_id:
+            packageId,
+
+          credits:
+            String(credits),
+
+          user_identifier:
+            userIdentifier
+              ? String(userIdentifier)
+              : ""
 
         }
 
@@ -258,9 +309,9 @@ export const createSafepayTracker = async (
 
 
     console.log(
-      "Safepay response:",
+      "Safepay payment response:",
       JSON.stringify(
-        response,
+        paymentResponse,
         null,
         2
       )
@@ -268,18 +319,18 @@ export const createSafepayTracker = async (
 
 
     // --------------------------------------------------
-    // Get tracker
+    // Extract tracker token
     // --------------------------------------------------
 
     const trackerToken =
-      response?.data?.tracker?.token;
+      paymentResponse?.data?.tracker?.token;
 
 
     if (!trackerToken) {
 
       console.error(
-        "Safepay did not return tracker token:",
-        response
+        "Safepay tracker token missing:",
+        paymentResponse
       );
 
       return res.status(500).json({
@@ -295,58 +346,33 @@ export const createSafepayTracker = async (
 
 
     console.log(
-      "Tracker:",
+      "Tracker Token:",
       trackerToken
     );
 
 
     // --------------------------------------------------
-    // Save ALL application information in Supabase
+    // CREATE PASSPORT TOKEN
     // --------------------------------------------------
 
-    const supabase =
-      getSupabaseClient();
+    const passportResponse =
+      await safepay.auth.passport.create();
 
 
-    const {
-      error: databaseError
-    } =
-      await supabase
-        .from("payments")
-        .insert({
-
-          order_id:
-            orderId,
-
-          user_id:
-            userIdentifier || null,
-
-          package_id:
-            packageId,
-
-          credits:
-            credits,
-
-          amount:
-            price,
-
-          currency:
-            currency,
-
-          tracker_token:
-            trackerToken,
-
-          status:
-            "PENDING"
-
-        });
+    console.log(
+      "Passport response received."
+    );
 
 
-    if (databaseError) {
+    const authenticationToken =
+      passportResponse?.data;
+
+
+    if (!authenticationToken) {
 
       console.error(
-        "Supabase payment insert error:",
-        databaseError
+        "Safepay passport response:",
+        passportResponse
       );
 
       return res.status(500).json({
@@ -354,7 +380,7 @@ export const createSafepayTracker = async (
         success: false,
 
         message:
-          "Safepay tracker created, but payment could not be saved."
+          "Safepay did not return authentication token."
 
       });
 
@@ -362,33 +388,7 @@ export const createSafepayTracker = async (
 
 
     // --------------------------------------------------
-    // Create passport token
-    // --------------------------------------------------
-
-    const passportResponse =
-      await safepay.auth.passport.create();
-
-
-    const tbt =
-      passportResponse?.data;
-
-
-    if (!tbt) {
-
-      return res.status(500).json({
-
-        success: false,
-
-        message:
-          "Safepay authentication token was not created."
-
-      });
-
-    }
-
-
-    // --------------------------------------------------
-    // Checkout URLs
+    // CHECKOUT URL
     // --------------------------------------------------
 
     const frontendUrl =
@@ -396,17 +396,13 @@ export const createSafepayTracker = async (
       "http://localhost:3000";
 
 
-    const redirectUrl =
+    const successUrl =
       `${frontendUrl}/payment/success`;
 
 
     const cancelUrl =
       `${frontendUrl}/payment/cancel`;
 
-
-    // --------------------------------------------------
-    // Create checkout URL
-    // --------------------------------------------------
 
     const checkoutUrl =
       safepay.checkouts.payment.create({
@@ -415,7 +411,7 @@ export const createSafepayTracker = async (
           trackerToken,
 
         tbt:
-          tbt,
+          authenticationToken,
 
         environment:
           SAFEPAY_ENVIRONMENT,
@@ -424,12 +420,26 @@ export const createSafepayTracker = async (
           "hosted",
 
         redirect_url:
-          redirectUrl,
+          successUrl,
 
         cancel_url:
           cancelUrl
 
       });
+
+
+    if (!checkoutUrl) {
+
+      return res.status(500).json({
+
+        success: false,
+
+        message:
+          "Failed to generate Safepay checkout URL."
+
+      });
+
+    }
 
 
     console.log(
@@ -439,7 +449,73 @@ export const createSafepayTracker = async (
 
 
     // --------------------------------------------------
-    // Response
+    // SAVE PENDING PAYMENT
+    // --------------------------------------------------
+
+    try {
+
+      const supabase =
+        getSupabaseClient();
+
+
+      const {
+        error: databaseError
+      } =
+        await supabase
+          .from("payments")
+          .insert({
+
+            order_id:
+              orderId,
+
+            user_id:
+              userIdentifier || null,
+
+            package_id:
+              packageId,
+
+            credits:
+              credits,
+
+            amount:
+              price,
+
+            currency:
+              currency,
+
+            tracker_token:
+              trackerToken,
+
+            status:
+              "PENDING"
+
+          });
+
+
+      if (databaseError) {
+
+        console.error(
+          "Supabase payment insert error:",
+          databaseError
+        );
+
+      }
+
+    } catch (databaseError) {
+
+      console.error(
+        "Supabase error:",
+        databaseError
+      );
+
+      // Do not prevent checkout because
+      // logging the pending payment failed.
+
+    }
+
+
+    // --------------------------------------------------
+    // RETURN TO FRONTEND
     // --------------------------------------------------
 
     return res.status(200).json({
@@ -447,25 +523,32 @@ export const createSafepayTracker = async (
       success: true,
 
       orderId:
+
         orderId,
 
-      trackerToken:
-        trackerToken,
-
-      checkoutUrl:
-        checkoutUrl,
-
       packageId:
+
         packageId,
 
       credits:
+
         credits,
 
       amount:
+
         price,
 
       currency:
-        currency
+
+        currency,
+
+      trackerToken:
+
+        trackerToken,
+
+      checkoutUrl:
+
+        checkoutUrl
 
     });
 
@@ -473,21 +556,545 @@ export const createSafepayTracker = async (
   } catch (error) {
 
     console.error(
-      "================================"
+      "======================================"
     );
 
     console.error(
-      "SAFEPAY ERROR"
+      "SAFEPAY CREATE TRACKER ERROR"
     );
 
     console.error(
-      error?.response?.data ||
-      error?.message ||
       error
     );
 
     console.error(
-      "================================"
+      "======================================"
+    );
+
+
+    return res.status(
+      error?.statusCode || 500
+    ).json({
+
+      success: false,
+
+      message:
+        error?.message ||
+        "Failed to create Safepay payment.",
+
+      error:
+        process.env.NODE_ENV === "development"
+          ? String(error)
+          : undefined
+
+    });
+
+  }
+
+};
+
+
+// ======================================================
+// VERIFY SAFEPAY PAYMENT
+// ======================================================
+
+export const verifySafepayPayment = async (
+  req,
+  res
+) => {
+
+  try {
+
+    const {
+      trackerToken
+    } = req.body || {};
+
+
+    // --------------------------------------------------
+    // Validate tracker
+    // --------------------------------------------------
+
+    if (!trackerToken) {
+
+      return res.status(400).json({
+
+        success: false,
+
+        message:
+          "trackerToken is required."
+
+      });
+
+    }
+
+
+    // --------------------------------------------------
+    // Supabase
+    // --------------------------------------------------
+
+    const supabase =
+      getSupabaseClient();
+
+
+    // --------------------------------------------------
+    // Safepay
+    // --------------------------------------------------
+
+    const safepay =
+      getSafepayClient();
+
+
+    // --------------------------------------------------
+    // Fetch payment using Reporter API
+    //
+    // Current SDK method:
+    //
+    // safepay.reporter.payments.fetch()
+    // --------------------------------------------------
+
+    const paymentResponse =
+      await safepay.reporter.payments.fetch(
+        trackerToken
+      );
+
+
+    console.log(
+      "Safepay payment status:",
+      JSON.stringify(
+        paymentResponse,
+        null,
+        2
+      )
+    );
+
+
+    const tracker =
+      paymentResponse?.data;
+
+
+    if (!tracker) {
+
+      return res.status(400).json({
+
+        success: false,
+
+        message:
+          "Safepay returned no payment information."
+
+      });
+
+    }
+
+
+    // --------------------------------------------------
+    // Determine state
+    // --------------------------------------------------
+
+    const paymentState =
+      tracker?.tracker?.state ||
+      tracker?.state;
+
+
+    console.log(
+      "Payment state:",
+      paymentState
+    );
+
+
+    // --------------------------------------------------
+    // Only process completed payment
+    // --------------------------------------------------
+
+    if (
+      paymentState !==
+        "TRACKER_ENDED" &&
+      paymentState !==
+        "PAID"
+    ) {
+
+      return res.status(400).json({
+
+        success: false,
+
+        message:
+          `Payment is not completed. Current status: ${paymentState || "UNKNOWN"}`
+
+      });
+
+    }
+
+
+    // --------------------------------------------------
+    // Check whether payment already processed
+    // --------------------------------------------------
+
+    const {
+      data: existingPayment,
+      error: existingPaymentError
+    } =
+      await supabase
+        .from("payments")
+        .select(
+          "id, user_id, package_id, credits, status"
+        )
+        .eq(
+          "tracker_token",
+          trackerToken
+        )
+        .maybeSingle();
+
+
+    if (existingPaymentError) {
+
+      console.error(
+        "Payment lookup error:",
+        existingPaymentError
+      );
+
+    }
+
+
+    if (
+      existingPayment &&
+      existingPayment.status === "PAID"
+    ) {
+
+      return res.status(200).json({
+
+        success: true,
+
+        alreadyProcessed:
+          true,
+
+        message:
+          "Payment has already been processed."
+
+      });
+
+    }
+
+
+    // --------------------------------------------------
+    // Get payment metadata
+    // --------------------------------------------------
+
+    const metadata =
+      tracker?.tracker?.metadata ||
+      tracker?.metadata ||
+      {};
+
+
+    let packageId =
+      metadata.package_id;
+
+
+    let userIdentifier =
+      metadata.user_identifier;
+
+
+    // --------------------------------------------------
+    // If metadata isn't available, use database
+    // --------------------------------------------------
+
+    if (
+      !packageId ||
+      !userIdentifier
+    ) {
+
+      const {
+        data: pendingPayment
+      } =
+        await supabase
+          .from("payments")
+          .select(
+            "user_id, package_id, credits"
+          )
+          .eq(
+            "tracker_token",
+            trackerToken
+          )
+          .maybeSingle();
+
+
+      if (pendingPayment) {
+
+        packageId =
+          packageId ||
+          pendingPayment.package_id;
+
+        userIdentifier =
+          userIdentifier ||
+          pendingPayment.user_id;
+
+      }
+
+    }
+
+
+    // --------------------------------------------------
+    // Validate package
+    // --------------------------------------------------
+
+    const selectedPackage =
+      PACKAGES[packageId];
+
+
+    if (!selectedPackage) {
+
+      return res.status(400).json({
+
+        success: false,
+
+        message:
+          "Unable to determine purchased package."
+
+      });
+
+    }
+
+
+    const addedCredits =
+      selectedPackage.credits;
+
+
+    // --------------------------------------------------
+    // Validate user
+    // --------------------------------------------------
+
+    if (!userIdentifier) {
+
+      return res.status(400).json({
+
+        success: false,
+
+        message:
+          "Unable to determine user."
+
+      });
+
+    }
+
+
+    // --------------------------------------------------
+    // Find user
+    // --------------------------------------------------
+
+    const isEmail =
+      String(userIdentifier).includes("@");
+
+
+    const queryColumn =
+      isEmail
+        ? "email"
+        : "id";
+
+
+    const {
+      data: userData,
+      error: userError
+    } =
+      await supabase
+        .from("users")
+        .select(
+          "id, credits"
+        )
+        .eq(
+          queryColumn,
+          userIdentifier
+        )
+        .maybeSingle();
+
+
+    if (userError) {
+
+      console.error(
+        "User lookup error:",
+        userError
+      );
+
+      return res.status(500).json({
+
+        success: false,
+
+        message:
+          "Failed to find user."
+
+      });
+
+    }
+
+
+    if (!userData) {
+
+      return res.status(404).json({
+
+        success: false,
+
+        message:
+          "User not found."
+
+      });
+
+    }
+
+
+    // --------------------------------------------------
+    // Calculate new credits
+    // --------------------------------------------------
+
+    const currentCredits =
+      Number(userData.credits) || 0;
+
+
+    const newCreditBalance =
+      currentCredits +
+      addedCredits;
+
+
+    // --------------------------------------------------
+    // Update credits
+    // --------------------------------------------------
+
+    const {
+      error: creditUpdateError
+    } =
+      await supabase
+        .from("users")
+        .update({
+
+          credits:
+            newCreditBalance
+
+        })
+        .eq(
+          "id",
+          userData.id
+        );
+
+
+    if (creditUpdateError) {
+
+      console.error(
+        "Credit update error:",
+        creditUpdateError
+      );
+
+      return res.status(500).json({
+
+        success: false,
+
+        message:
+          "Payment verified, but credits could not be updated."
+
+      });
+
+    }
+
+
+    // --------------------------------------------------
+    // Record payment
+    // --------------------------------------------------
+
+    const {
+      error: paymentInsertError
+    } =
+      await supabase
+        .from("payments")
+        .upsert({
+
+          tracker_token:
+            trackerToken,
+
+          user_id:
+            userData.id,
+
+          package_id:
+            packageId,
+
+          credits:
+            addedCredits,
+
+          amount:
+            selectedPackage.price,
+
+          currency:
+            selectedPackage.currency,
+
+          status:
+            "PAID"
+
+        }, {
+
+          onConflict:
+            "tracker_token"
+
+        });
+
+
+    if (paymentInsertError) {
+
+      console.error(
+        "Payment recording error:",
+        paymentInsertError
+      );
+
+      return res.status(500).json({
+
+        success: false,
+
+        message:
+          "Credits were updated but payment record could not be saved."
+
+      });
+
+    }
+
+
+    // --------------------------------------------------
+    // SUCCESS
+    // --------------------------------------------------
+
+    return res.status(200).json({
+
+      success: true,
+
+      alreadyProcessed:
+        false,
+
+      message:
+        `Payment successful! Added ${addedCredits} credits.`,
+
+      addedCredits:
+
+        addedCredits,
+
+      newCreditBalance:
+
+        newCreditBalance,
+
+      trackerToken:
+
+        trackerToken
+
+    });
+
+
+  } catch (error) {
+
+    console.error(
+      "======================================"
+    );
+
+    console.error(
+      "SAFEPAY PAYMENT VERIFICATION ERROR"
+    );
+
+    console.error(
+      error
+    );
+
+    console.error(
+      "======================================"
     );
 
 
@@ -496,9 +1103,8 @@ export const createSafepayTracker = async (
       success: false,
 
       message:
-        error?.response?.data?.status?.message ||
         error?.message ||
-        "Failed to create Safepay payment."
+        "Error verifying Safepay payment."
 
     });
 
