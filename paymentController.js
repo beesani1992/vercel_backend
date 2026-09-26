@@ -292,17 +292,6 @@ export const createSafepayTracker = async (
           order_id:
             orderId,
 
-          package_id:
-            packageId,
-
-          credits:
-            String(credits),
-
-          user_identifier:
-            userIdentifier
-              ? String(userIdentifier)
-              : ""
-
         }
 
       });
