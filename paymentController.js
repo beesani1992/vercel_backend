@@ -333,13 +333,7 @@ export const createSafepayTracker = async (
         metadata: {
 
           order_id:
-            orderId,
-
-          package_id:
-            packageId,
-
-          user_email:
-            normalizedUserEmail
+            orderId
 
         }
 
