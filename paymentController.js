@@ -46,7 +46,7 @@ const PACKAGES = {
 
 
 // ======================================================
-// SUPABASE
+// SUPABASE CLIENT
 // ======================================================
 
 const getSupabaseClient = () => {
@@ -150,12 +150,54 @@ export const createSafepayTracker = async (
     } = req.body || {};
 
 
+    // --------------------------------------------------
+    // Validate packageId
+    // --------------------------------------------------
+
     if (!packageId) {
 
       return res.status(400).json({
         success: false,
         message:
           "packageId is required."
+      });
+
+    }
+
+
+    // --------------------------------------------------
+    // Validate userEmail
+    // --------------------------------------------------
+
+    if (
+      !userEmail ||
+      typeof userEmail !== "string"
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "userEmail is required."
+      });
+
+    }
+
+
+    const normalizedUserEmail =
+      userEmail.trim().toLowerCase();
+
+
+    // Basic email validation
+    const emailRegex =
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+
+    if (!emailRegex.test(normalizedUserEmail)) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "A valid userEmail is required."
       });
 
     }
@@ -241,6 +283,11 @@ export const createSafepayTracker = async (
     );
 
     console.log(
+      "User Email:",
+      normalizedUserEmail
+    );
+
+    console.log(
       "Order ID:",
       orderId
     );
@@ -260,10 +307,6 @@ export const createSafepayTracker = async (
 
     // --------------------------------------------------
     // CREATE PAYMENT SESSION
-    //
-    // Current Safepay SDK method:
-    //
-    // safepay.payments.session.setup()
     // --------------------------------------------------
 
     const paymentResponse =
@@ -291,6 +334,12 @@ export const createSafepayTracker = async (
 
           order_id:
             orderId,
+
+          package_id:
+            packageId,
+
+          user_email:
+            normalizedUserEmail
 
         }
 
@@ -443,8 +492,8 @@ export const createSafepayTracker = async (
             order_id:
               orderId,
 
-            user_id:
-              userIdentifier || null,
+            user_email:
+              normalizedUserEmail,
 
             package_id:
               packageId,
@@ -479,12 +528,13 @@ export const createSafepayTracker = async (
     } catch (databaseError) {
 
       console.error(
-        "Supabase error:",
+        "Supabase error while saving pending payment:",
         databaseError
       );
 
-      // Do not prevent checkout because
-      // logging the pending payment failed.
+      // Checkout should still be returned.
+      // Payment verification can recover the
+      // package/user information from Safepay metadata.
 
     }
 
@@ -498,31 +548,27 @@ export const createSafepayTracker = async (
       success: true,
 
       orderId:
-
         orderId,
 
       packageId:
-
         packageId,
 
       credits:
-
         credits,
 
       amount:
-
         price,
 
       currency:
-
         currency,
 
-      trackerToken:
+      userEmail:
+        normalizedUserEmail,
 
+      trackerToken:
         trackerToken,
 
       checkoutUrl:
-
         checkoutUrl
 
     });
@@ -580,6 +626,10 @@ export const verifySafepayPayment = async (
 
   try {
 
+    // --------------------------------------------------
+    // Request body
+    // --------------------------------------------------
+
     const {
       trackerToken
     } = req.body || {};
@@ -621,10 +671,6 @@ export const verifySafepayPayment = async (
 
     // --------------------------------------------------
     // Fetch payment using Reporter API
-    //
-    // Current SDK method:
-    //
-    // safepay.reporter.payments.fetch()
     // --------------------------------------------------
 
     const paymentResponse =
@@ -662,7 +708,7 @@ export const verifySafepayPayment = async (
 
 
     // --------------------------------------------------
-    // Determine state
+    // Determine payment state
     // --------------------------------------------------
 
     const paymentState =
@@ -681,10 +727,8 @@ export const verifySafepayPayment = async (
     // --------------------------------------------------
 
     if (
-      paymentState !==
-        "TRACKER_ENDED" &&
-      paymentState !==
-        "PAID"
+      paymentState !== "TRACKER_ENDED" &&
+      paymentState !== "PAID"
     ) {
 
       return res.status(400).json({
@@ -692,7 +736,9 @@ export const verifySafepayPayment = async (
         success: false,
 
         message:
-          `Payment is not completed. Current status: ${paymentState || "UNKNOWN"}`
+          `Payment is not completed. Current status: ${
+            paymentState || "UNKNOWN"
+          }`
 
       });
 
@@ -700,7 +746,7 @@ export const verifySafepayPayment = async (
 
 
     // --------------------------------------------------
-    // Check whether payment already processed
+    // Find existing payment
     // --------------------------------------------------
 
     const {
@@ -710,7 +756,7 @@ export const verifySafepayPayment = async (
       await supabase
         .from("payments")
         .select(
-          "id, user_id, package_id, credits, status"
+          "id, order_id, user_id, user_email, package_id, credits, amount, currency, status"
         )
         .eq(
           "tracker_token",
@@ -729,6 +775,10 @@ export const verifySafepayPayment = async (
     }
 
 
+    // --------------------------------------------------
+    // Already processed
+    // --------------------------------------------------
+
     if (
       existingPayment &&
       existingPayment.status === "PAID"
@@ -742,7 +792,10 @@ export const verifySafepayPayment = async (
           true,
 
         message:
-          "Payment has already been processed."
+          "Payment has already been processed.",
+
+        addedCredits:
+          Number(existingPayment.credits) || 0
 
       });
 
@@ -750,7 +803,7 @@ export const verifySafepayPayment = async (
 
 
     // --------------------------------------------------
-    // Get payment metadata
+    // Get Safepay metadata
     // --------------------------------------------------
 
     const metadata =
@@ -760,46 +813,64 @@ export const verifySafepayPayment = async (
 
 
     let packageId =
-      metadata.package_id;
+      metadata.package_id ||
+      metadata.packageId ||
+      null;
 
 
     let userEmail =
-      metadata.userEmail;
+      metadata.user_email ||
+      metadata.userEmail ||
+      null;
+
+
+    let orderId =
+      metadata.order_id ||
+      metadata.orderId ||
+      null;
 
 
     // --------------------------------------------------
-    // If metadata isn't available, use database
+    // Normalize metadata email
+    // --------------------------------------------------
+
+    if (
+      userEmail &&
+      typeof userEmail === "string"
+    ) {
+
+      userEmail =
+        userEmail.trim().toLowerCase();
+
+    }
+
+
+    // --------------------------------------------------
+    // Recover information from pending payment
     // --------------------------------------------------
 
     if (
       !packageId ||
-      !userEmail
+      !userEmail ||
+      !orderId
     ) {
 
-      const {
-        data: pendingPayment
-      } =
-        await supabase
-          .from("payments")
-          .select(
-            "userEmail, package_id, credits"
-          )
-          .eq(
-            "tracker_token",
-            trackerToken
-          )
-          .maybeSingle();
-
-
-      if (pendingPayment) {
+      if (existingPayment) {
 
         packageId =
           packageId ||
-          pendingPayment.package_id;
+          existingPayment.package_id ||
+          null;
 
         userEmail =
           userEmail ||
-          pendingPayment.userEmail;
+          existingPayment.user_email ||
+          null;
+
+        orderId =
+          orderId ||
+          existingPayment.order_id ||
+          null;
 
       }
 
@@ -833,7 +904,7 @@ export const verifySafepayPayment = async (
 
 
     // --------------------------------------------------
-    // Validate user
+    // Validate user email
     // --------------------------------------------------
 
     if (!userEmail) {
@@ -843,7 +914,7 @@ export const verifySafepayPayment = async (
         success: false,
 
         message:
-          "Unable to determine user."
+          "Unable to determine userEmail."
 
       });
 
@@ -851,7 +922,7 @@ export const verifySafepayPayment = async (
 
 
     // --------------------------------------------------
-    // Find user
+    // Find user by EMAIL
     // --------------------------------------------------
 
     const {
@@ -861,7 +932,7 @@ export const verifySafepayPayment = async (
       await supabase
         .from("users")
         .select(
-          "id, credits"
+          "id, email, credits"
         )
         .eq(
           "email",
@@ -896,7 +967,7 @@ export const verifySafepayPayment = async (
         success: false,
 
         message:
-          "User not found."
+          `User not found for email: ${userEmail}`
 
       });
 
@@ -917,7 +988,7 @@ export const verifySafepayPayment = async (
 
 
     // --------------------------------------------------
-    // Update credits
+    // Update user credits
     // --------------------------------------------------
 
     const {
@@ -957,15 +1028,18 @@ export const verifySafepayPayment = async (
 
 
     // --------------------------------------------------
-    // Record payment
+    // Record payment as PAID
     // --------------------------------------------------
 
     const {
-      error: paymentInsertError
+      error: paymentUpsertError
     } =
       await supabase
         .from("payments")
         .upsert({
+
+          order_id:
+            orderId,
 
           tracker_token:
             trackerToken,
@@ -973,7 +1047,8 @@ export const verifySafepayPayment = async (
           user_id:
             userData.id,
 
-          user_email: userEmail,
+          user_email:
+            userEmail,
 
           package_id:
             packageId,
@@ -998,11 +1073,11 @@ export const verifySafepayPayment = async (
         });
 
 
-    if (paymentInsertError) {
+    if (paymentUpsertError) {
 
       console.error(
         "Payment recording error:",
-        paymentInsertError
+        paymentUpsertError
       );
 
       return res.status(500).json({
@@ -1032,15 +1107,21 @@ export const verifySafepayPayment = async (
         `Payment successful! Added ${addedCredits} credits.`,
 
       addedCredits:
-
         addedCredits,
 
       newCreditBalance:
-
         newCreditBalance,
 
-      trackerToken:
+      userEmail:
+        userEmail,
 
+      packageId:
+        packageId,
+
+      orderId:
+        orderId,
+
+      trackerToken:
         trackerToken
 
     });
@@ -1065,13 +1146,20 @@ export const verifySafepayPayment = async (
     );
 
 
-    return res.status(500).json({
+    return res.status(
+      error?.statusCode || 500
+    ).json({
 
       success: false,
 
       message:
         error?.message ||
-        "Error verifying Safepay payment."
+        "Error verifying Safepay payment.",
+
+      error:
+        process.env.NODE_ENV === "development"
+          ? String(error)
+          : undefined
 
     });
 
