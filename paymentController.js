@@ -146,7 +146,7 @@ export const createSafepayTracker = async (
 
     const {
       packageId,
-      userIdentifier
+      userEmail
     } = req.body || {};
 
 
@@ -763,8 +763,8 @@ export const verifySafepayPayment = async (
       metadata.package_id;
 
 
-    let userIdentifier =
-      metadata.user_identifier;
+    let userEmail =
+      metadata.userEmail;
 
 
     // --------------------------------------------------
@@ -773,7 +773,7 @@ export const verifySafepayPayment = async (
 
     if (
       !packageId ||
-      !userIdentifier
+      !userEmail
     ) {
 
       const {
@@ -782,7 +782,7 @@ export const verifySafepayPayment = async (
         await supabase
           .from("payments")
           .select(
-            "user_id, package_id, credits"
+            "userEmail, package_id, credits"
           )
           .eq(
             "tracker_token",
@@ -797,9 +797,9 @@ export const verifySafepayPayment = async (
           packageId ||
           pendingPayment.package_id;
 
-        userIdentifier =
-          userIdentifier ||
-          pendingPayment.user_id;
+        userEmail =
+          userEmail ||
+          pendingPayment.userEmail;
 
       }
 
@@ -836,7 +836,7 @@ export const verifySafepayPayment = async (
     // Validate user
     // --------------------------------------------------
 
-    if (!userIdentifier) {
+    if (!userEmail) {
 
       return res.status(400).json({
 
@@ -854,16 +854,6 @@ export const verifySafepayPayment = async (
     // Find user
     // --------------------------------------------------
 
-    const isEmail =
-      String(userIdentifier).includes("@");
-
-
-    const queryColumn =
-      isEmail
-        ? "email"
-        : "id";
-
-
     const {
       data: userData,
       error: userError
@@ -874,8 +864,8 @@ export const verifySafepayPayment = async (
           "id, credits"
         )
         .eq(
-          queryColumn,
-          userIdentifier
+          "email",
+          userEmail
         )
         .maybeSingle();
 
@@ -982,6 +972,8 @@ export const verifySafepayPayment = async (
 
           user_id:
             userData.id,
+
+          user_email: userEmail,
 
           package_id:
             packageId,
