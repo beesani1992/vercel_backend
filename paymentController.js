@@ -388,7 +388,7 @@ export const createSafepayTracker = async (
     // --------------------------------------------------
 
     const passportResponse =
-      await safepay.passport.create();
+      await safepay.auth.passport.create();
 
 
     console.log(
