@@ -86,21 +86,26 @@ const getSupabaseClient = () => {
 // SAFEPAY CLIENT
 // ======================================================
 
-const getSafepayClient = () => {
+const Safepay = require('@sfpy/node-core');
 
+const getSafepayClient = () => {
+  const SAFEPAY_SECRET_KEY = process.env.SAFEPAY_SECRET_KEY;
+  const SAFEPAY_HOST = process.env.NODE_ENV === 'production'
+    ? 'https://api.getsafepay.com'
+    : 'https://sandbox.api.getsafepay.com';
+
+  // 1. Validate environment key BEFORE initialization
   if (!SAFEPAY_SECRET_KEY) {
-    throw new Error(
-      "SAFEPAY_SECRET_KEY is missing."
-    );
+    throw new Error("SAFEPAY_SECRET_KEY is missing from environment variables.");
   }
 
-  return new Safepay(
-    SAFEPAY_SECRET_KEY,
-    {
-      authType: "secret",
-      host: SAFEPAY_HOST
-    }
-  );
+  // 2. Initialize and return the instance directly
+  const safepay = Safepay(SAFEPAY_SECRET_KEY, {
+    authType: 'secret',
+    host: SAFEPAY_HOST
+  });
+
+  return safepay;
 };
 
 
