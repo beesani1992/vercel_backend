@@ -90,9 +90,7 @@ const Safepay = require('@sfpy/node-core');
 
 const getSafepayClient = () => {
   const SAFEPAY_SECRET_KEY = process.env.SAFEPAY_SECRET_KEY;
-  const SAFEPAY_HOST = process.env.NODE_ENV === 'production'
-    ? 'https://api.getsafepay.com'
-    : 'https://sandbox.api.getsafepay.com';
+  const SAFEPAY_HOST = 'https://sandbox.api.getsafepay.com';
 
   // 1. Validate environment key BEFORE initialization
   if (!SAFEPAY_SECRET_KEY) {
