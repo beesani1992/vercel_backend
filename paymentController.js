@@ -97,9 +97,7 @@ export const createSafepayTracker = async (req, res) => {
       currency,
       amount: amountInLowestDenomination,
       metadata: {
-        order_id: orderId,
-        package_id: packageId,
-        user_email: normalizedUserEmail
+        order_id: orderId
       }
     });
 
