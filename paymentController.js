@@ -2,1164 +2,347 @@ import Safepay from "@sfpy/node-core";
 import { createClient } from "@supabase/supabase-js";
 
 // ======================================================
-// ENVIRONMENT
-// ======================================================
-
-const SAFEPAY_SECRET_KEY =
-  process.env.SAFEPAY_SECRET_KEY;
-
-const SAFEPAY_API_KEY =
-  process.env.SAFEPAY_API_KEY;
-
-const SAFEPAY_HOST =
-  process.env.SAFEPAY_HOST ||
-  "https://sandbox.api.getsafepay.com";
-
-const SAFEPAY_ENVIRONMENT =
-  process.env.SAFEPAY_ENVIRONMENT ||
-  "sandbox";
-
-
-// ======================================================
-// PACKAGE CONFIGURATION
+// CONFIGURATION & HELPERS
 // ======================================================
 
 const PACKAGES = {
-  "100_credits": {
-    credits: 100,
-    price: 5,
-    currency: "USD"
-  },
-
-  "500_credits": {
-    credits: 500,
-    price: 20,
-    currency: "USD"
-  },
-
-  "1500_credits": {
-    credits: 1500,
-    price: 50,
-    currency: "USD"
-  }
+  "100_credits": { credits: 100, price: 5, currency: "USD" },
+  "500_credits": { credits: 500, price: 20, currency: "USD" },
+  "1500_credits": { credits: 1500, price: 50, currency: "USD" }
 };
 
-
-// ======================================================
-// SUPABASE CLIENT
-// ======================================================
+const getEnv = () => ({
+  SAFEPAY_SECRET_KEY: process.env.SAFEPAY_SECRET_KEY,
+  SAFEPAY_API_KEY: process.env.SAFEPAY_API_KEY,
+  SAFEPAY_HOST: process.env.SAFEPAY_HOST || "https://sandbox.api.getsafepay.com",
+  SAFEPAY_ENVIRONMENT: process.env.SAFEPAY_ENVIRONMENT || "sandbox",
+  SUPABASE_URL: process.env.SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  FRONTEND_URL: process.env.FRONTEND_URL || "http://localhost:3000"
+});
 
 const getSupabaseClient = () => {
+  const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = getEnv();
 
-  const supabaseUrl =
-    process.env.SUPABASE_URL;
-
-  const supabaseServiceKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl) {
-    throw new Error(
-      "SUPABASE_URL is missing."
-    );
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("Missing Supabase configuration environment variables.");
   }
 
-  if (!supabaseServiceKey) {
-    throw new Error(
-      "SUPABASE_SERVICE_ROLE_KEY is missing."
-    );
-  }
-
-  return createClient(
-    supabaseUrl,
-    supabaseServiceKey,
-    {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false
-      }
-    }
-  );
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
 };
 
-
-// ======================================================
-// SAFEPAY CLIENT
-// ======================================================
-
-const Safepay = require('@sfpy/node-core');
-
 const getSafepayClient = () => {
-  const SAFEPAY_SECRET_KEY = process.env.SAFEPAY_SECRET_KEY;
-  const SAFEPAY_HOST = 'https://sandbox.api.getsafepay.com';
+  const { SAFEPAY_SECRET_KEY, SAFEPAY_HOST } = getEnv();
 
-  // 1. Validate environment key BEFORE initialization
   if (!SAFEPAY_SECRET_KEY) {
     throw new Error("SAFEPAY_SECRET_KEY is missing from environment variables.");
   }
 
-  // 2. Initialize and return the instance directly
-  const safepay = Safepay(SAFEPAY_SECRET_KEY, {
-    authType: 'secret',
+  return Safepay(SAFEPAY_SECRET_KEY, {
+    authType: "secret",
     host: SAFEPAY_HOST
   });
-
-  return safepay;
 };
-
 
 // ======================================================
 // CREATE SAFEPAY PAYMENT SESSION
 // ======================================================
 
-export const createSafepayTracker = async (
-  req,
-  res
-) => {
-
+export const createSafepayTracker = async (req, res) => {
   try {
+    const { SAFEPAY_SECRET_KEY, SAFEPAY_API_KEY, SAFEPAY_HOST, SAFEPAY_ENVIRONMENT, FRONTEND_URL } = getEnv();
 
-    // --------------------------------------------------
-    // Validate Safepay configuration
-    // --------------------------------------------------
-
-    if (!SAFEPAY_SECRET_KEY) {
-
+    if (!SAFEPAY_SECRET_KEY || !SAFEPAY_API_KEY) {
       return res.status(500).json({
         success: false,
-        message:
-          "SAFEPAY_SECRET_KEY is not configured."
+        message: "Safepay API or Secret key is not configured."
       });
-
     }
 
-    if (!SAFEPAY_API_KEY) {
+    const { packageId, userEmail } = req.body || {};
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "SAFEPAY_API_KEY is not configured."
-      });
-
-    }
-
-
-    // --------------------------------------------------
-    // Request body
-    // --------------------------------------------------
-
-    const {
-      packageId,
-      userEmail
-    } = req.body || {};
-
-
-    // --------------------------------------------------
-    // Validate packageId
-    // --------------------------------------------------
-
-    if (!packageId) {
-
+    if (!packageId || !PACKAGES[packageId]) {
       return res.status(400).json({
         success: false,
-        message:
-          "packageId is required."
+        message: "Invalid or missing packageId.",
+        availablePackages: Object.keys(PACKAGES)
       });
-
     }
 
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const normalizedUserEmail = userEmail?.trim().toLowerCase();
 
-    // --------------------------------------------------
-    // Validate userEmail
-    // --------------------------------------------------
-
-    if (
-      !userEmail ||
-      typeof userEmail !== "string"
-    ) {
-
+    if (!normalizedUserEmail || !emailRegex.test(normalizedUserEmail)) {
       return res.status(400).json({
         success: false,
-        message:
-          "userEmail is required."
+        message: "A valid userEmail is required."
       });
-
     }
 
+    const selectedPackage = PACKAGES[packageId];
+    const { credits, price, currency } = selectedPackage;
+    const orderId = `ORDER_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+    const amountInLowestDenomination = Math.round(price * 100);
 
-    const normalizedUserEmail =
-      userEmail.trim().toLowerCase();
+    const safepay = getSafepayClient();
 
+    // 1. Create Payment Session
+    const paymentResponse = await safepay.payments.session.setup({
+      merchant_api_key: SAFEPAY_API_KEY,
+      intent: "CYBERSOURCE",
+      mode: "payment",
+      entry_mode: "raw",
+      currency,
+      amount: amountInLowestDenomination,
+      metadata: {
+        order_id: orderId,
+        package_id: packageId,
+        user_email: normalizedUserEmail
+      }
+    });
 
-    // Basic email validation
-    const emailRegex =
-      /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-
-    if (!emailRegex.test(normalizedUserEmail)) {
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "A valid userEmail is required."
-      });
-
-    }
-
-
-    // --------------------------------------------------
-    // Validate package
-    // --------------------------------------------------
-
-    const selectedPackage =
-      PACKAGES[packageId];
-
-
-    if (!selectedPackage) {
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid packageId.",
-        availablePackages:
-          Object.keys(PACKAGES)
-      });
-
-    }
-
-
-    const {
-      credits,
-      price,
-      currency
-    } = selectedPackage;
-
-
-    // --------------------------------------------------
-    // Generate order ID
-    // --------------------------------------------------
-
-    const orderId =
-      `ORDER_${Date.now()}_${Math.random()
-        .toString(36)
-        .substring(2, 10)}`;
-
-
-    // --------------------------------------------------
-    // Convert USD to lowest denomination
-    //
-    // $5  = 500
-    // $20 = 2000
-    // $50 = 5000
-    // --------------------------------------------------
-
-    const amountInLowestDenomination =
-      Math.round(price * 100);
-
-
-    console.log(
-      "======================================"
-    );
-
-    console.log(
-      "Creating Safepay Payment Session"
-    );
-
-    console.log(
-      "Package:",
-      packageId
-    );
-
-    console.log(
-      "Credits:",
-      credits
-    );
-
-    console.log(
-      "Price:",
-      price,
-      currency
-    );
-
-    console.log(
-      "Amount:",
-      amountInLowestDenomination
-    );
-
-    console.log(
-      "User Email:",
-      normalizedUserEmail
-    );
-
-    console.log(
-      "Order ID:",
-      orderId
-    );
-
-    console.log(
-      "======================================"
-    );
-
-
-    // --------------------------------------------------
-    // Safepay client
-    // --------------------------------------------------
-
-    const safepay =
-      getSafepayClient();
-
-
-    // --------------------------------------------------
-    // CREATE PAYMENT SESSION
-    // --------------------------------------------------
-
-    const paymentResponse =
-      await safepay.payments.session.setup({
-
-        merchant_api_key:
-          SAFEPAY_API_KEY,
-
-        intent:
-          "CYBERSOURCE",
-
-        mode:
-          "payment",
-
-        entry_mode:
-          "raw",
-
-        currency:
-          currency,
-
-        amount:
-          amountInLowestDenomination,
-
-        metadata: {
-
-          order_id:
-            orderId
-
-        }
-
-      });
-
-
-    console.log(
-      "Safepay payment response:",
-      JSON.stringify(
-        paymentResponse,
-        null,
-        2
-      )
-    );
-
-
-    // --------------------------------------------------
-    // Extract tracker token
-    // --------------------------------------------------
-
-    const trackerToken =
-      paymentResponse?.data?.tracker?.token;
-
-
+    const trackerToken = paymentResponse?.data?.tracker?.token;
     if (!trackerToken) {
-
-      console.error(
-        "Safepay tracker token missing:",
-        paymentResponse
-      );
-
+      console.error("Safepay tracker token missing:", paymentResponse);
       return res.status(500).json({
-
         success: false,
-
-        message:
-          "Safepay did not return a tracker token."
-
+        message: "Safepay did not return a tracker token."
       });
-
     }
 
-
-    console.log(
-      "Tracker Token:",
-      trackerToken
-    );
-
-
-    // --------------------------------------------------
-    // CREATE PASSPORT TOKEN
-    // --------------------------------------------------
-
-    const passportResponse =
-      await safepay.auth.passport.create();
-
-
-    console.log(
-      "Passport response received."
-    );
-
-
-    const authenticationToken =
-      passportResponse?.data;
-
+    // 2. Create Passport Token
+    const passportResponse = await safepay.auth.passport.create();
+    const authenticationToken = passportResponse?.data;
 
     if (!authenticationToken) {
-
-      console.error(
-        "Safepay passport response:",
-        passportResponse
-      );
-
+      console.error("Safepay passport token missing:", passportResponse);
       return res.status(500).json({
-
         success: false,
-
-        message:
-          "Safepay did not return authentication token."
-
+        message: "Safepay did not return authentication token."
       });
-
     }
 
+    // 3. Build Checkout URL
+    const successUrl = `${FRONTEND_URL}/payment/success`;
+    const cancelUrl = `${FRONTEND_URL}/payment/cancel`;
 
-    // --------------------------------------------------
-    // CHECKOUT URL
-    // --------------------------------------------------
+    const checkoutParams = new URLSearchParams({
+      tracker: trackerToken,
+      tbt: authenticationToken,
+      environment: SAFEPAY_ENVIRONMENT,
+      source: "hosted",
+      redirect_url: successUrl,
+      cancel_url: cancelUrl
+    });
 
-    const frontendUrl =
-      process.env.FRONTEND_URL ||
-      "http://localhost:3000";
+    const checkoutUrl = `${SAFEPAY_HOST}/embedded/checkout?${checkoutParams.toString()}`;
 
-
-    const successUrl =
-      `${frontendUrl}/payment/success`;
-
-
-    const cancelUrl =
-      `${frontendUrl}/payment/cancel`;
-
-
-    const checkoutUrl =
-      `${SAFEPAY_HOST}/embedded/checkout` +
-      `?tracker=${encodeURIComponent(trackerToken)}` +
-      `&tbt=${encodeURIComponent(authenticationToken)}` +
-      `&environment=${encodeURIComponent(SAFEPAY_ENVIRONMENT)}` +
-      `&source=hosted` +
-      `&redirect_url=${encodeURIComponent(successUrl)}` +
-      `&cancel_url=${encodeURIComponent(cancelUrl)}`;
-
-
-    if (!checkoutUrl) {
-
-      return res.status(500).json({
-
-        success: false,
-
-        message:
-          "Failed to generate Safepay checkout URL."
-
-      });
-
-    }
-
-
-    console.log(
-      "Checkout URL:",
-      checkoutUrl
-    );
-
-
-    // --------------------------------------------------
-    // SAVE PENDING PAYMENT
-    // --------------------------------------------------
-
+    // 4. Record Pending Payment in Supabase
     try {
-
-      const supabase =
-        getSupabaseClient();
-
-
-      const {
-        error: databaseError
-      } =
-        await supabase
-          .from("payments")
-          .insert({
-
-            order_id:
-              orderId,
-
-            user_email:
-              normalizedUserEmail,
-
-            package_id:
-              packageId,
-
-            credits:
-              credits,
-
-            amount:
-              price,
-
-            currency:
-              currency,
-
-            tracker_token:
-              trackerToken,
-
-            status:
-              "PENDING"
-
-          });
-
+      const supabase = getSupabaseClient();
+      const { error: databaseError } = await supabase.from("payments").insert({
+        order_id: orderId,
+        user_email: normalizedUserEmail,
+        package_id: packageId,
+        credits,
+        amount: price,
+        currency,
+        tracker_token: trackerToken,
+        status: "PENDING"
+      });
 
       if (databaseError) {
-
-        console.error(
-          "Supabase payment insert error:",
-          databaseError
-        );
-
+        console.error("Supabase pending payment insert error:", databaseError);
       }
-
-    } catch (databaseError) {
-
-      console.error(
-        "Supabase error while saving pending payment:",
-        databaseError
-      );
-
-      // Checkout should still be returned.
-      // Payment verification can recover the
-      // package/user information from Safepay metadata.
-
+    } catch (dbErr) {
+      console.error("Database connection failure while saving pending payment:", dbErr);
     }
 
-
-    // --------------------------------------------------
-    // RETURN TO FRONTEND
-    // --------------------------------------------------
-
     return res.status(200).json({
-
       success: true,
-
-      orderId:
-        orderId,
-
-      packageId:
-        packageId,
-
-      credits:
-        credits,
-
-      amount:
-        price,
-
-      currency:
-        currency,
-
-      userEmail:
-        normalizedUserEmail,
-
-      trackerToken:
-        trackerToken,
-
-      checkoutUrl:
-        checkoutUrl
-
+      orderId,
+      packageId,
+      credits,
+      amount: price,
+      currency,
+      userEmail: normalizedUserEmail,
+      trackerToken,
+      checkoutUrl
     });
-
-
   } catch (error) {
-
-    console.error(
-      "======================================"
-    );
-
-    console.error(
-      "SAFEPAY CREATE TRACKER ERROR"
-    );
-
-    console.error(
-      error
-    );
-
-    console.error(
-      "======================================"
-    );
-
-
-    return res.status(
-      error?.statusCode || 500
-    ).json({
-
+    console.error("SAFEPAY CREATE TRACKER ERROR:", error);
+    return res.status(error?.statusCode || 500).json({
       success: false,
-
-      message:
-        error?.message ||
-        "Failed to create Safepay payment.",
-
-      error:
-        process.env.NODE_ENV === "development"
-          ? String(error)
-          : undefined
-
+      message: error?.message || "Failed to create Safepay payment.",
+      error: process.env.NODE_ENV === "development" ? String(error) : undefined
     });
-
   }
-
 };
-
 
 // ======================================================
 // VERIFY SAFEPAY PAYMENT
 // ======================================================
 
-export const verifySafepayPayment = async (
-  req,
-  res
-) => {
-
+export const verifySafepayPayment = async (req, res) => {
   try {
-
-    // --------------------------------------------------
-    // Request body
-    // --------------------------------------------------
-
-    const {
-      trackerToken
-    } = req.body || {};
-
-
-    // --------------------------------------------------
-    // Validate tracker
-    // --------------------------------------------------
+    const { trackerToken } = req.body || {};
 
     if (!trackerToken) {
-
       return res.status(400).json({
-
         success: false,
-
-        message:
-          "trackerToken is required."
-
+        message: "trackerToken is required."
       });
-
     }
 
+    const supabase = getSupabaseClient();
+    const safepay = getSafepayClient();
 
-    // --------------------------------------------------
-    // Supabase
-    // --------------------------------------------------
-
-    const supabase =
-      getSupabaseClient();
-
-
-    // --------------------------------------------------
-    // Safepay
-    // --------------------------------------------------
-
-    const safepay =
-      getSafepayClient();
-
-
-    // --------------------------------------------------
-    // Fetch payment using Reporter API
-    // --------------------------------------------------
-
-    const paymentResponse =
-      await safepay.reporter.payments.fetch(
-        trackerToken
-      );
-
-
-    console.log(
-      "Safepay payment status:",
-      JSON.stringify(
-        paymentResponse,
-        null,
-        2
-      )
-    );
-
-
-    const tracker =
-      paymentResponse?.data;
-
+    // 1. Fetch payment status from Safepay Reporter API
+    const paymentResponse = await safepay.reporter.payments.fetch(trackerToken);
+    const tracker = paymentResponse?.data;
 
     if (!tracker) {
-
       return res.status(400).json({
-
         success: false,
-
-        message:
-          "Safepay returned no payment information."
-
+        message: "Safepay returned no payment information."
       });
-
     }
 
+    const paymentState = tracker?.tracker?.state || tracker?.state;
 
-    // --------------------------------------------------
-    // Determine payment state
-    // --------------------------------------------------
-
-    const paymentState =
-      tracker?.tracker?.state ||
-      tracker?.state;
-
-
-    console.log(
-      "Payment state:",
-      paymentState
-    );
-
-
-    // --------------------------------------------------
-    // Only process completed payment
-    // --------------------------------------------------
-
-    if (
-      paymentState !== "TRACKER_ENDED" &&
-      paymentState !== "PAID"
-    ) {
-
+    if (paymentState !== "TRACKER_ENDED" && paymentState !== "PAID") {
       return res.status(400).json({
-
         success: false,
-
-        message:
-          `Payment is not completed. Current status: ${
-            paymentState || "UNKNOWN"
-          }`
-
+        message: `Payment is not completed. Current status: ${paymentState || "UNKNOWN"}`
       });
-
     }
 
-
-    // --------------------------------------------------
-    // Find existing payment
-    // --------------------------------------------------
-
-    const {
-      data: existingPayment,
-      error: existingPaymentError
-    } =
-      await supabase
-        .from("payments")
-        .select(
-          "id, order_id, user_id, user_email, package_id, credits, amount, currency, status"
-        )
-        .eq(
-          "tracker_token",
-          trackerToken
-        )
-        .maybeSingle();
-
+    // 2. Check existing payment in Supabase
+    const { data: existingPayment, error: existingPaymentError } = await supabase
+      .from("payments")
+      .select("id, order_id, user_id, user_email, package_id, credits, amount, currency, status")
+      .eq("tracker_token", trackerToken)
+      .maybeSingle();
 
     if (existingPaymentError) {
-
-      console.error(
-        "Payment lookup error:",
-        existingPaymentError
-      );
-
+      console.error("Payment lookup error:", existingPaymentError);
     }
 
-
-    // --------------------------------------------------
-    // Already processed
-    // --------------------------------------------------
-
-    if (
-      existingPayment &&
-      existingPayment.status === "PAID"
-    ) {
-
+    // Early exit if already processed
+    if (existingPayment && existingPayment.status === "PAID") {
       return res.status(200).json({
-
         success: true,
-
-        alreadyProcessed:
-          true,
-
-        message:
-          "Payment has already been processed.",
-
-        addedCredits:
-          Number(existingPayment.credits) || 0
-
+        alreadyProcessed: true,
+        message: "Payment has already been processed.",
+        addedCredits: Number(existingPayment.credits) || 0
       });
-
     }
 
+    // 3. Resolve metadata fallback
+    const metadata = tracker?.tracker?.metadata || tracker?.metadata || {};
+    let packageId = metadata.package_id || metadata.packageId || existingPayment?.package_id || null;
+    let userEmail = metadata.user_email || metadata.userEmail || existingPayment?.user_email || null;
+    let orderId = metadata.order_id || metadata.orderId || existingPayment?.order_id || null;
 
-    // --------------------------------------------------
-    // Get Safepay metadata
-    // --------------------------------------------------
-
-    const metadata =
-      tracker?.tracker?.metadata ||
-      tracker?.metadata ||
-      {};
-
-
-    let packageId =
-      metadata.package_id ||
-      metadata.packageId ||
-      null;
-
-
-    let userEmail =
-      metadata.user_email ||
-      metadata.userEmail ||
-      null;
-
-
-    let orderId =
-      metadata.order_id ||
-      metadata.orderId ||
-      null;
-
-
-    // --------------------------------------------------
-    // Normalize metadata email
-    // --------------------------------------------------
-
-    if (
-      userEmail &&
-      typeof userEmail === "string"
-    ) {
-
-      userEmail =
-        userEmail.trim().toLowerCase();
-
+    if (userEmail && typeof userEmail === "string") {
+      userEmail = userEmail.trim().toLowerCase();
     }
 
-
-    // --------------------------------------------------
-    // Recover information from pending payment
-    // --------------------------------------------------
-
-    if (
-      !packageId ||
-      !userEmail ||
-      !orderId
-    ) {
-
-      if (existingPayment) {
-
-        packageId =
-          packageId ||
-          existingPayment.package_id ||
-          null;
-
-        userEmail =
-          userEmail ||
-          existingPayment.user_email ||
-          null;
-
-        orderId =
-          orderId ||
-          existingPayment.order_id ||
-          null;
-
-      }
-
-    }
-
-
-    // --------------------------------------------------
-    // Validate package
-    // --------------------------------------------------
-
-    const selectedPackage =
-      PACKAGES[packageId];
-
-
+    const selectedPackage = PACKAGES[packageId];
     if (!selectedPackage) {
-
       return res.status(400).json({
-
         success: false,
-
-        message:
-          "Unable to determine purchased package."
-
+        message: "Unable to determine purchased package."
       });
-
     }
-
-
-    const addedCredits =
-      selectedPackage.credits;
-
-
-    // --------------------------------------------------
-    // Validate user email
-    // --------------------------------------------------
 
     if (!userEmail) {
-
       return res.status(400).json({
-
         success: false,
-
-        message:
-          "Unable to determine userEmail."
-
+        message: "Unable to determine userEmail."
       });
-
     }
 
+    // 4. Fetch User
+    const { data: userData, error: userError } = await supabase
+      .from("users")
+      .select("id, email, credits")
+      .eq("email", userEmail)
+      .maybeSingle();
 
-    // --------------------------------------------------
-    // Find user by EMAIL
-    // --------------------------------------------------
-
-    const {
-      data: userData,
-      error: userError
-    } =
-      await supabase
-        .from("users")
-        .select(
-          "id, email, credits"
-        )
-        .eq(
-          "email",
-          userEmail
-        )
-        .maybeSingle();
-
-
-    if (userError) {
-
-      console.error(
-        "User lookup error:",
-        userError
-      );
-
-      return res.status(500).json({
-
+    if (userError || !userData) {
+      console.error("User lookup error:", userError);
+      return res.status(userError ? 500 : 404).json({
         success: false,
-
-        message:
-          "Failed to find user."
-
+        message: userError ? "Failed to find user." : `User not found for email: ${userEmail}`
       });
-
     }
 
+    const addedCredits = selectedPackage.credits;
 
-    if (!userData) {
-
-      return res.status(404).json({
-
-        success: false,
-
-        message:
-          `User not found for email: ${userEmail}`
-
-      });
-
-    }
-
-
-    // --------------------------------------------------
-    // Calculate new credits
-    // --------------------------------------------------
-
-    const currentCredits =
-      Number(userData.credits) || 0;
-
-
-    const newCreditBalance =
-      currentCredits +
-      addedCredits;
-
-
-    // --------------------------------------------------
-    // Update user credits
-    // --------------------------------------------------
-
-    const {
-      error: creditUpdateError
-    } =
-      await supabase
-        .from("users")
-        .update({
-
-          credits:
-            newCreditBalance
-
-        })
-        .eq(
-          "id",
-          userData.id
-        );
-
-
-    if (creditUpdateError) {
-
-      console.error(
-        "Credit update error:",
-        creditUpdateError
-      );
-
-      return res.status(500).json({
-
-        success: false,
-
-        message:
-          "Payment verified, but credits could not be updated."
-
-      });
-
-    }
-
-
-    // --------------------------------------------------
-    // Record payment as PAID
-    // --------------------------------------------------
-
-    const {
-      error: paymentUpsertError
-    } =
-      await supabase
-        .from("payments")
-        .upsert({
-
-          order_id:
-            orderId,
-
-          tracker_token:
-            trackerToken,
-
-          user_id:
-            userData.id,
-
-          user_email:
-            userEmail,
-
-          package_id:
-            packageId,
-
-          credits:
-            addedCredits,
-
-          amount:
-            selectedPackage.price,
-
-          currency:
-            selectedPackage.currency,
-
-          status:
-            "PAID"
-
-        }, {
-
-          onConflict:
-            "tracker_token"
-
-        });
-
+    // 5. Atomic Lock: Lock payment row by marking status PAID first
+    const { data: updatedPayment, error: paymentUpsertError } = await supabase
+      .from("payments")
+      .upsert(
+        {
+          order_id: orderId,
+          tracker_token: trackerToken,
+          user_id: userData.id,
+          user_email: userEmail,
+          package_id: packageId,
+          credits: addedCredits,
+          amount: selectedPackage.price,
+          currency: selectedPackage.currency,
+          status: "PAID"
+        },
+        { onConflict: "tracker_token" }
+      )
+      .select();
 
     if (paymentUpsertError) {
-
-      console.error(
-        "Payment recording error:",
-        paymentUpsertError
-      );
-
+      console.error("Payment recording error:", paymentUpsertError);
       return res.status(500).json({
-
         success: false,
-
-        message:
-          "Credits were updated but payment record could not be saved."
-
+        message: "Payment recording failed."
       });
-
     }
 
+    // 6. Update user credits (Safe atomic addition)
+    const currentCredits = Number(userData.credits) || 0;
+    const newCreditBalance = currentCredits + addedCredits;
 
-    // --------------------------------------------------
-    // SUCCESS
-    // --------------------------------------------------
+    const { error: creditUpdateError } = await supabase
+      .from("users")
+      .update({ credits: newCreditBalance })
+      .eq("id", userData.id);
+
+    if (creditUpdateError) {
+      console.error("Credit update error:", creditUpdateError);
+      return res.status(500).json({
+        success: false,
+        message: "Payment recorded, but credit balance update failed."
+      });
+    }
 
     return res.status(200).json({
-
       success: true,
-
-      alreadyProcessed:
-        false,
-
-      message:
-        `Payment successful! Added ${addedCredits} credits.`,
-
-      addedCredits:
-        addedCredits,
-
-      newCreditBalance:
-        newCreditBalance,
-
-      userEmail:
-        userEmail,
-
-      packageId:
-        packageId,
-
-      orderId:
-        orderId,
-
-      trackerToken:
-        trackerToken
-
+      alreadyProcessed: false,
+      message: `Payment successful! Added ${addedCredits} credits.`,
+      addedCredits,
+      newCreditBalance,
+      userEmail,
+      packageId,
+      orderId,
+      trackerToken
     });
-
-
   } catch (error) {
-
-    console.error(
-      "======================================"
-    );
-
-    console.error(
-      "SAFEPAY PAYMENT VERIFICATION ERROR"
-    );
-
-    console.error(
-      error
-    );
-
-    console.error(
-      "======================================"
-    );
-
-
-    return res.status(
-      error?.statusCode || 500
-    ).json({
-
+    console.error("SAFEPAY PAYMENT VERIFICATION ERROR:", error);
+    return res.status(error?.statusCode || 500).json({
       success: false,
-
-      message:
-        error?.message ||
-        "Error verifying Safepay payment.",
-
-      error:
-        process.env.NODE_ENV === "development"
-          ? String(error)
-          : undefined
-
+      message: error?.message || "Error verifying Safepay payment.",
+      error: process.env.NODE_ENV === "development" ? String(error) : undefined
     });
-
   }
-
 };
