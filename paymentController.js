@@ -1,5 +1,8 @@
-import Safepay from "@sfpy/node-core";
+import SafepaySDK from "@sfpy/node-core";
 import { createClient } from "@supabase/supabase-js";
+
+// Safely unwrap ESM / CommonJS default export
+const Safepay = SafepaySDK?.default || SafepaySDK;
 
 // ======================================================
 // CONFIGURATION & HELPERS
@@ -88,7 +91,7 @@ export const createSafepayTracker = async (req, res) => {
 
     const safepay = getSafepayClient();
 
-    // 1. Create Payment Session
+    // 1. Create Payment Session (with complete metadata)
     const paymentResponse = await safepay.payments.session.setup({
       merchant_api_key: SAFEPAY_API_KEY,
       intent: "CYBERSOURCE",
@@ -97,7 +100,9 @@ export const createSafepayTracker = async (req, res) => {
       currency,
       amount: amountInLowestDenomination,
       metadata: {
-        order_id: orderId
+        order_id: orderId,
+        package_id: packageId,
+        user_email: normalizedUserEmail
       }
     });
 
@@ -110,8 +115,8 @@ export const createSafepayTracker = async (req, res) => {
       });
     }
 
-    // 2. Create Passport Token
-    const passportResponse = await safepay.auth.passport.create();
+    // 2. Create Passport Token (FIXED: safepay.passport.create())
+    const passportResponse = await safepay.passport.create();
     const authenticationToken = passportResponse?.data;
 
     if (!authenticationToken) {
@@ -307,7 +312,7 @@ export const verifySafepayPayment = async (req, res) => {
       });
     }
 
-    // 6. Update user credits (Safe atomic addition)
+    // 6. Update user credits
     const currentCredits = Number(userData.credits) || 0;
     const newCreditBalance = currentCredits + addedCredits;
 
