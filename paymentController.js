@@ -84,7 +84,7 @@ export const createSafepayTracker = async (req, res) => {
       intent: "CYBERSOURCE",
       mode: "payment",
       entry_mode: "raw",
-      currency,
+      currency: "USD",
       amount: amountInLowestDenomination,
       metadata: {
         order_id: orderId
