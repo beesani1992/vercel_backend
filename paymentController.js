@@ -89,6 +89,9 @@ export const createSafepayTracker = async (req, res) => {
       metadata: {
         order_id: orderId
       }
+    }).catch((err) => {
+      console.error("Safepay session setup error:", err);
+      return null;
     });
 
     const trackerToken = paymentResponse?.data?.tracker?.token;
