@@ -503,70 +503,29 @@ export const createSafepayTracker =
       //
       // --------------------------------------------------
 
-      if (
-        !safepay.checkouts ||
-        !safepay.checkouts.payment ||
-        typeof safepay.checkouts.payment.create !==
-          "function"
-      ) {
-
-        throw new Error(
-          "Installed @sfpy/node-core does not expose safepay.checkouts.payment.create(). Please update @sfpy/node-core."
-        );
-      }
-
-
       const successUrl =
         `${FRONTEND_URL}/payment/success`;
 
       const cancelUrl =
         `${FRONTEND_URL}/payment/cancel`;
 
-
       const checkoutUrl =
-        safepay.checkouts.payment.create({
-
-          tracker:
-            trackerToken,
-
-          tbt:
-            authenticationToken,
-
-          environment:
-            SAFEPAY_ENVIRONMENT,
-
-          source:
-            "hosted",
-
-          redirect_url:
-            successUrl,
-
-          cancel_url:
-            cancelUrl
-
-        });
-
-
-      if (
-        !checkoutUrl ||
-        typeof checkoutUrl !== "string"
-      ) {
-
-        console.error(
-          "[Safepay] Invalid checkout URL:",
-          checkoutUrl
-        );
-
-        throw new Error(
-          "Safepay failed to generate the checkout URL."
-        );
-      }
-
+        `${SAFEPAY_HOST}/embedded/checkout` +
+        `?tracker=${encodeURIComponent(trackerToken)}` +
+        `&tbt=${encodeURIComponent(authenticationToken)}` +
+        `&environment=${encodeURIComponent(SAFEPAY_ENVIRONMENT)}` +
+        `&source=hosted` +
+        `&redirect_url=${encodeURIComponent(successUrl)}` +
+        `&cancel_url=${encodeURIComponent(cancelUrl)}`;
 
       console.log(
-        "[Safepay] Checkout URL generated."
+        "[Safepay] Checkout URL generated successfully."
       );
 
+      console.log(
+        "[Safepay] Checkout URL:",
+        checkoutUrl
+      );
 
       // --------------------------------------------------
       // SAVE PENDING PAYMENT
