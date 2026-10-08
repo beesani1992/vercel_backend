@@ -669,536 +669,354 @@ export const createSafepayTracker =
 // VERIFY SAFEPAY PAYMENT
 // ======================================================
 
-export const verifySafepayPayment =
-  async (req, res) => {
-
-    try {
-
-      // --------------------------------------------------
-      // Request body
-      // --------------------------------------------------
-
-      const {
-        trackerToken
-      } = req.body || {};
-
-
-      if (!trackerToken) {
-
-        return res.status(400).json({
-
-          success:
-            false,
-
-          message:
-            "trackerToken is required."
-
-        });
-      }
-
-
-      // --------------------------------------------------
-      // Clients
-      // --------------------------------------------------
-
-      const supabase =
-        getSupabaseClient();
-
-      const safepay =
-        getSafepayClient();
-
-
-      // --------------------------------------------------
-      // Ask Safepay for current payment status
-      // --------------------------------------------------
-
-      const paymentResponse =
-        await safepay
-          .reporter
-          .payments
-          .fetch(
-            trackerToken
-          );
-
-
-      console.log(
-        "[Safepay] Verification response:",
-        JSON.stringify(
-          paymentResponse,
-          null,
-          2
-        )
-      );
-
-
-      // --------------------------------------------------
-      // Extract tracker
-      // --------------------------------------------------
-
-      const tracker =
-        paymentResponse?.data;
-
-
-      if (!tracker) {
-
-        return res.status(400).json({
-
-          success:
-            false,
-
-          message:
-            "Safepay returned no payment information."
-
-        });
-      }
-
-
-      // --------------------------------------------------
-      // Payment state
-      // --------------------------------------------------
-
-      const paymentState =
-        tracker?.tracker?.state ||
-        tracker?.state;
-
-
-      console.log(
-        "[Safepay] Payment state:",
-        paymentState
-      );
-
-
-      // --------------------------------------------------
-      // Payment must be completed
-      // --------------------------------------------------
-
-      if (
-        paymentState !== "TRACKER_ENDED" &&
-        paymentState !== "PAID"
-      ) {
-
-        return res.status(400).json({
-
-          success:
-            false,
-
-          message:
-            `Payment is not completed. Current status: ${
-              paymentState || "UNKNOWN"
-            }`
-
-        });
-      }
-
-
-      // --------------------------------------------------
-      // Find our pending payment
-      // --------------------------------------------------
-
-      const {
-        data: existingPayment,
-        error: existingPaymentError
-      } =
-        await supabase
-          .from("payments")
-          .select(
-            "id, order_id, user_id, user_email, package_id, credits, amount, currency, status"
-          )
-          .eq(
-            "tracker_token",
-            trackerToken
-          )
-          .maybeSingle();
-
-
-      if (existingPaymentError) {
-
-        console.error(
-          "[Supabase] Payment lookup error:",
-          existingPaymentError
-        );
-
-        return res.status(500).json({
-
-          success:
-            false,
-
-          message:
-            "Failed to find payment record."
-
-        });
-      }
-
-
-      if (!existingPayment) {
-
-        return res.status(404).json({
-
-          success:
-            false,
-
-          message:
-            "Payment record was not found in the database."
-
-        });
-      }
-
-
-      // --------------------------------------------------
-      // Prevent double crediting
-      // --------------------------------------------------
-
-      if (
-        existingPayment.status ===
-        "PAID"
-      ) {
-
-        return res.status(200).json({
-
-          success:
-            true,
-
-          alreadyProcessed:
-            true,
-
-          message:
-            "Payment has already been processed.",
-
-          addedCredits:
-            Number(
-              existingPayment.credits
-            ) || 0,
-
-          userEmail:
-            existingPayment.user_email,
-
-          packageId:
-            existingPayment.package_id,
-
-          orderId:
-            existingPayment.order_id
-
-        });
-      }
-
-
-      // --------------------------------------------------
-      // Get package from OUR database
-      // --------------------------------------------------
-
-      const packageId =
-        existingPayment.package_id;
-
-      const selectedPackage =
-        PACKAGES[packageId];
-
-
-      if (!selectedPackage) {
-
-        return res.status(400).json({
-
-          success:
-            false,
-
-          message:
-            `Invalid package stored in payment record: ${packageId}`
-
-        });
-      }
-
-
-      const addedCredits =
-        selectedPackage.credits;
-
-
-      // --------------------------------------------------
-      // Get user email from OUR database
-      // --------------------------------------------------
-
-      const userEmail =
-        normalizeEmail(
-          existingPayment.user_email
-        );
-
-
-      if (!userEmail) {
-
-        return res.status(400).json({
-
-          success:
-            false,
-
-          message:
-            "Payment record does not contain a valid userEmail."
-
-        });
-      }
-
-
-      // --------------------------------------------------
-      // Find user by email
-      // --------------------------------------------------
-
-      const {
-        data: userData,
-        error: userError
-      } =
-        await supabase
-          .from("users")
-          .select(
-            "id, email, credits"
-          )
-          .eq(
-            "email",
-            userEmail
-          )
-          .maybeSingle();
-
-
-      if (userError) {
-
-        console.error(
-          "[Supabase] User lookup error:",
-          userError
-        );
-
-        return res.status(500).json({
-
-          success:
-            false,
-
-          message:
-            "Failed to find user."
-
-        });
-      }
-
-
-      if (!userData) {
-
-        return res.status(404).json({
-
-          success:
-            false,
-
-          message:
-            `User not found for email: ${userEmail}`
-
-        });
-      }
-
-
-      // --------------------------------------------------
-      // Current credits
-      // --------------------------------------------------
-
-      const currentCredits =
-        Number(
-          userData.credits
-        ) || 0;
-
-
-      const newCreditBalance =
-        currentCredits +
-        addedCredits;
-
-
-      // --------------------------------------------------
-      // Update user credits
-      // --------------------------------------------------
-
-      const {
-        error: creditUpdateError
-      } =
-        await supabase
-          .from("users")
-          .update({
-
-            credits:
-              newCreditBalance
-
-          })
-          .eq(
-            "id",
-            userData.id
-          );
-
-
-      if (creditUpdateError) {
-
-        console.error(
-          "[Supabase] Credit update error:",
-          creditUpdateError
-        );
-
-        return res.status(500).json({
-
-          success:
-            false,
-
-          message:
-            "Payment verified, but credits could not be updated."
-
-        });
-      }
-
-
-      // --------------------------------------------------
-      // Mark payment as PAID
-      // --------------------------------------------------
-
-      const {
-        error: paymentUpdateError
-      } =
-        await supabase
-          .from("payments")
-          .update({
-
-            user_id:
-              userData.id,
-
-            user_email:
-              userEmail,
-
-            package_id:
-              packageId,
-
-            credits:
-              addedCredits,
-
-            amount:
-              selectedPackage.price,
-
-            currency:
-              selectedPackage.currency,
-
-            status:
-              "PAID"
-
-          })
-          .eq(
-            "tracker_token",
-            trackerToken
-          );
-
-
-      if (paymentUpdateError) {
-
-        console.error(
-          "[Supabase] Payment update error:",
-          paymentUpdateError
-        );
-
-        return res.status(500).json({
-
-          success:
-            false,
-
-          message:
-            "Credits were updated but payment status could not be saved."
-
-        });
-      }
-
-
-      // --------------------------------------------------
-      // SUCCESS
-      // --------------------------------------------------
-
-      console.log(
-        "======================================"
-      );
-
-      console.log(
-        "[Safepay] PAYMENT VERIFIED"
-      );
-
-      console.log(
-        "[Safepay] User:",
-        userEmail
-      );
-
-      console.log(
-        "[Safepay] Package:",
-        packageId
-      );
-
-      console.log(
-        "[Safepay] Added credits:",
-        addedCredits
-      );
-
-      console.log(
-        "[Safepay] New balance:",
-        newCreditBalance
-      );
-
-      console.log(
-        "======================================"
-      );
-
-
-      return res.status(200).json({
-
-        success:
-          true,
-
-        alreadyProcessed:
-          false,
-
-        message:
-          `Payment successful! Added ${addedCredits} credits.`,
-
-        addedCredits:
-          addedCredits,
-
-        newCreditBalance:
-          newCreditBalance,
-
-        userEmail:
-          userEmail,
-
-        packageId:
-          packageId,
-
-        orderId:
-          existingPayment.order_id,
-
-        trackerToken:
-          trackerToken
-
-      });
-
-    } catch (error) {
-
-      console.error(
-        "======================================"
-      );
-
-      console.error(
-        "[Safepay] PAYMENT VERIFICATION ERROR"
-      );
-
-      console.error(
-        error
-      );
-
-      console.error(
-        "======================================"
-      );
-
-
-      return res.status(
-        error?.statusCode || 500
-      ).json({
-
-        success:
-          false,
-
-        message:
-          error?.message ||
-          "Error verifying Safepay payment."
-
+export const verifySafepayPayment = async (req, res) => {
+  try {
+    // ==================================================
+    // 1. GET TRACKER TOKEN
+    // ==================================================
+
+    const { trackerToken } = req.body || {};
+
+    if (!trackerToken) {
+      return res.status(400).json({
+        success: false,
+        message: "trackerToken is required."
       });
     }
-  };
+
+    // ==================================================
+    // 2. INITIALIZE CLIENTS
+    // ==================================================
+
+    const supabase = getSupabaseClient();
+    const safepay = getSafepayClient();
+
+    // ==================================================
+    // 3. VERIFY PAYMENT WITH SAFEPAY
+    // ==================================================
+
+    const paymentResponse =
+      await safepay.reporter.payments.fetch(trackerToken);
+
+    console.log(
+      "Safepay verification response:",
+      JSON.stringify(paymentResponse, null, 2)
+    );
+
+    const tracker = paymentResponse?.data;
+
+    if (!tracker) {
+      return res.status(400).json({
+        success: false,
+        message: "Safepay returned no payment information."
+      });
+    }
+
+    const paymentState =
+      tracker?.tracker?.state ||
+      tracker?.state;
+
+    console.log(
+      "Safepay payment state:",
+      paymentState
+    );
+
+    // ==================================================
+    // 4. ONLY CONTINUE FOR SUCCESSFUL PAYMENT
+    // ==================================================
+
+    if (
+      paymentState !== "TRACKER_ENDED" &&
+      paymentState !== "PAID"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          `Payment is not completed. Current status: ${
+            paymentState || "UNKNOWN"
+          }`
+      });
+    }
+
+    // ==================================================
+    // 5. FIND PENDING PAYMENT IN SUPABASE
+    // ==================================================
+
+    const {
+      data: existingPayment,
+      error: existingPaymentError
+    } = await supabase
+      .from("payments")
+      .select(
+        "id, order_id, user_id, user_email, package_id, credits, amount, currency, status"
+      )
+      .eq("tracker_token", trackerToken)
+      .maybeSingle();
+
+    if (existingPaymentError) {
+      console.error(
+        "Payment lookup error:",
+        existingPaymentError
+      );
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to lookup payment record."
+      });
+    }
+
+    if (!existingPayment) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "Payment record not found in Supabase for this tracker."
+      });
+    }
+
+    // ==================================================
+    // 6. ALREADY PROCESSED
+    // ==================================================
+
+    if (existingPayment.status === "PAID") {
+      return res.status(200).json({
+        success: true,
+        alreadyProcessed: true,
+        message: "Payment has already been processed.",
+        addedCredits:
+          Number(existingPayment.credits) || 0
+      });
+    }
+
+    // ==================================================
+    // 7. USE SUPABASE PAYMENT RECORD AS SOURCE OF TRUTH
+    // ==================================================
+
+    const packageId =
+      existingPayment.package_id;
+
+    const userEmail =
+      String(existingPayment.user_email || "")
+        .trim()
+        .toLowerCase();
+
+    const orderId =
+      existingPayment.order_id;
+
+    const selectedPackage =
+      PACKAGES[packageId];
+
+    if (!selectedPackage) {
+      return res.status(400).json({
+        success: false,
+        message:
+          `Invalid package stored in payment: ${packageId}`
+      });
+    }
+
+    if (!userEmail) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "No user email is stored with this payment."
+      });
+    }
+
+    // ==================================================
+    // 8. FIND USER BY EMAIL
+    // ==================================================
+
+    const {
+      data: userData,
+      error: userError
+    } = await supabase
+      .from("users")
+      .select("id, email, credits")
+      .eq("email", userEmail)
+      .maybeSingle();
+
+    if (userError) {
+      console.error(
+        "User lookup error:",
+        userError
+      );
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to find user."
+      });
+    }
+
+    if (!userData) {
+      return res.status(404).json({
+        success: false,
+        message:
+          `User not found for email: ${userEmail}`
+      });
+    }
+
+    // ==================================================
+    // 9. CALCULATE NEW CREDIT BALANCE
+    // ==================================================
+
+    const addedCredits =
+      Number(selectedPackage.credits);
+
+    const currentCredits =
+      Number(userData.credits) || 0;
+
+    const newCreditBalance =
+      currentCredits + addedCredits;
+
+    console.log(
+      "Credit update:",
+      {
+        email: userEmail,
+        currentCredits,
+        addedCredits,
+        newCreditBalance
+      }
+    );
+
+    // ==================================================
+    // 10. UPDATE USER CREDITS FIRST
+    // ==================================================
+
+    const {
+      data: updatedUser,
+      error: creditUpdateError
+    } = await supabase
+      .from("users")
+      .update({
+        credits: newCreditBalance
+      })
+      .eq("id", userData.id)
+      .select("id, email, credits")
+      .maybeSingle();
+
+    if (creditUpdateError) {
+      console.error(
+        "Credit update error:",
+        creditUpdateError
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Payment verified, but credit balance could not be updated.",
+        databaseError:
+          creditUpdateError.message
+      });
+    }
+
+    if (!updatedUser) {
+      return res.status(500).json({
+        success: false,
+        message:
+          "Credit update returned no updated user."
+      });
+    }
+
+    console.log(
+      "Credits successfully updated:",
+      updatedUser
+    );
+
+    // ==================================================
+    // 11. ONLY AFTER CREDIT UPDATE, MARK PAYMENT PAID
+    // ==================================================
+
+    const {
+      error: paymentUpdateError
+    } = await supabase
+      .from("payments")
+      .update({
+        status: "PAID",
+        user_id: userData.id,
+        user_email: userEmail,
+        package_id: packageId,
+        credits: addedCredits,
+        amount: selectedPackage.price,
+        currency: selectedPackage.currency,
+        order_id: orderId
+      })
+      .eq("tracker_token", trackerToken);
+
+    if (paymentUpdateError) {
+      console.error(
+        "Payment status update error:",
+        paymentUpdateError
+      );
+
+      /*
+       * IMPORTANT:
+       * Credits have already been added.
+       * We DO NOT add them again.
+       *
+       * The payment can be reconciled later.
+       */
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Credits were added successfully, but payment status could not be updated.",
+        addedCredits,
+        newCreditBalance,
+        userEmail
+      });
+    }
+
+    // ==================================================
+    // 12. SUCCESS
+    // ==================================================
+
+    return res.status(200).json({
+      success: true,
+      alreadyProcessed: false,
+
+      message:
+        `Payment successful! Added ${addedCredits} credits.`,
+
+      addedCredits,
+
+      newCreditBalance,
+
+      userEmail,
+
+      packageId,
+
+      orderId,
+
+      trackerToken
+    });
+
+  } catch (error) {
+    console.error(
+      "======================================"
+    );
+
+    console.error(
+      "SAFEPAY PAYMENT VERIFICATION ERROR"
+    );
+
+    console.error(error);
+
+    console.error(
+      "======================================"
+    );
+
+    return res.status(
+      error?.statusCode || 500
+    ).json({
+      success: false,
+
+      message:
+        error?.message ||
+        "Error verifying Safepay payment.",
+
+      error:
+        process.env.NODE_ENV === "development"
+          ? String(error)
+          : undefined
+    });
+  }
+};
