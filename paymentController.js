@@ -748,7 +748,7 @@ export const verifySafepayPayment = async (req, res) => {
     } = await supabase
       .from("payments")
       .select(
-        "id, order_id, user_id, user_email, package_id, credits, amount, currency, status"
+        "id, order_id, user_email, package_id, credits, amount, currency, status"
       )
       .eq("tracker_token", trackerToken)
       .maybeSingle();
