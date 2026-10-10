@@ -931,7 +931,6 @@ export const verifySafepayPayment = async (req, res) => {
       .from("payments")
       .update({
         status: "PAID",
-        user_id: userData.id,
         user_email: userEmail,
         package_id: packageId,
         credits: addedCredits,
